@@ -3,9 +3,11 @@
 A Python command-line tool for printing text and images to a **Nelko P21 Bluetooth thermal label printer** over bluetooth.
 
 
-## Prerequisites
+## Pairing
 
-### Ensure the current user is in the `dialout` group
+### Linux
+
+#### Ensure the current user is in the `dialout` group
 
 This allows access to `/dev/rfcomm0` without root:
 
@@ -15,8 +17,7 @@ sudo usermod -aG dialout "$USER"
 
 Log out and back in for the group change to take effect.
 
-
-### Pair the powered-on P21 device
+#### Pair the powered-on P21 device
 
 ```bash
 bluetoothctl
@@ -43,13 +44,53 @@ Attempting to pair with 15:B5:EF:46:08:B6
 
 </details>
 
-### Bind the device as an RFCOMM serial port
+#### Bind the device as an RFCOMM serial port
 
 ```bash
 sudo rfcomm bind /dev/rfcomm0 <DEVICE_MAC> 1
 ```
 
 You should now see `/dev/rfcomm0`.
+
+### macOS
+
+macOS does not require `usermod`, `bluetoothctl`, or `rfcomm` commands. The Bluetooth serial port is created automatically when the device is paired.
+
+#### Install blueutil
+
+```bash
+brew install blueutil
+```
+
+#### Scan for the P21 device
+
+Power on the P21 printer, then scan for nearby Bluetooth devices:
+
+```bash
+blueutil --inquiry 15
+```
+
+Look for a device named "P21" and note its MAC address (e.g., `aa-bb-cc-dd-ee-ff`).
+
+#### Pair the device
+
+Pair using the MAC address and PIN `0000`:
+
+```bash
+blueutil --pair aa-bb-cc-dd-ee-ff 0000
+```
+
+This creates the serial port at `/dev/tty.P21` and `/dev/cu.P21`.
+
+#### Connect before printing
+
+Before each print session, connect to the device:
+
+```bash
+blueutil --connect aa-bb-cc-dd-ee-ff
+```
+
+Use `/dev/cu.P21` as the device path when printing (see Example Usage below).
 
 
 ## Example Usage
