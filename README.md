@@ -74,38 +74,33 @@ Look for a device named "P21" and note its MAC address (e.g., `aa-bb-cc-dd-ee-ff
 
 #### Pair the device
 
-Pair using the MAC address and PIN `0000`:
-
-```bash
-blueutil --pair aa-bb-cc-dd-ee-ff 0000
-```
+Pair the P21 through **System Settings > Bluetooth**. The printer should appear as a discoverable device. Click **Connect** to pair it.
 
 This creates the serial port at `/dev/tty.P21` and `/dev/cu.P21`.
 
-#### Connect before printing
-
-Before each print session, connect to the device:
-
-```bash
-blueutil --connect aa-bb-cc-dd-ee-ff
-```
-
-Use `/dev/cu.P21` as the device path when printing (see Example Usage below).
+> **Note:** The P21's Bluetooth stack locks up after a single serial session. The `--bt-mac` and `--blueutil` flags handle this automatically by performing an unpair/re-pair cycle before each print. See [macOS usage](#macos-1) below.
 
 
 ## Example Usage
 
-### Print a text label
+### Linux
 
 ```bash
 ./p21.py --text "100Ω" # Single line
 ./p21.py --text $'100\n(Ω)' # Multi line
+./p21.py --image test-template.png
 ```
 
-### Print an image
+### macOS
+
+On macOS, pass `--bt-mac` and `--blueutil` to enable the automatic unpair/re-pair cycle required by the P21:
 
 ```bash
-./p21.py --image test-template.png
+./p21.py --image test-template.png --device /dev/cu.P21 \
+    --bt-mac aa-bb-cc-dd-ee-ff --blueutil "$(which blueutil)"
+
+./p21.py --text "100Ω" --device /dev/cu.P21 \
+    --bt-mac aa-bb-cc-dd-ee-ff --blueutil "$(which blueutil)"
 ```
 
 ### Preview only (no printing)
