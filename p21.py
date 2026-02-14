@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import subprocess
+import time
 from pathlib import Path
-from typing import Optional
 from matplotlib import font_manager
 
 import serial
@@ -21,16 +22,17 @@ DEFAULT_DENSITY = 7
 DEFAULT_COPIES = 1
 DEFAULT_DEVICE = "/dev/rfcomm0"
 
+
 def load_image(image_path, preview=False, threshold=180) -> bytes:
     """
-    Load an image, normalize it to a clean 1-bit 96×284 bitmap for the printer.
+    Load an image, normalize it to a clean 1-bit 96x284 bitmap for the printer.
     """
     img = Image.open(image_path)
 
     # Work in grayscale
     img = ImageOps.grayscale(img)
 
-    # Rotate so the longer side is vertical (to match 96×284)
+    # Rotate so the longer side is vertical (to match 96x284)
     if img.width > img.height:
         img = img.rotate(90, expand=True, fillcolor=255)
 
@@ -38,7 +40,7 @@ def load_image(image_path, preview=False, threshold=180) -> bytes:
     img = img.point(lambda p: 0 if p < threshold else 255, mode="1")
 
     if preview:
-        img.rotate(-90, expand=True, fillcolor=255).show(title="Image label (printer orientation 96×284)")
+        img.rotate(-90, expand=True, fillcolor=255).show(title="Image label (printer orientation 96x284)")
 
     bitdata = img.tobytes()
     if len(bitdata) < EXPECTED_BYTES:
@@ -113,21 +115,47 @@ def build_print_command(imagedata: bytes, density: int, copies: int) -> bytes:
     ).encode()
 
     footer = f"\r\nPRINT {copies}\r\n".encode()
-    
+
     return header + imagedata + footer
 
 
-def send_to_printer(device: str, payload: bytes) -> Optional[bytes]:
+def send_to_printer(device: str, payload: bytes,
+                    bt_mac: str = None, bt_pin: str = "0000",
+                    blueutil: str = None) -> bool:
     """
-    Open the serial device, send payload, and read a single response line.
+    Send payload to printer. If bt_mac is provided, performs a Bluetooth
+    unpair/re-pair cycle before sending (required for printers like the P21
+    that lock up after a single serial session).
     """
+    if bt_mac and blueutil:
+        subprocess.run([blueutil, "--unpair", bt_mac], capture_output=True)
+        time.sleep(2)
+        subprocess.run([blueutil, "--pair", bt_mac, bt_pin], capture_output=True)
+        subprocess.run([blueutil, "--connect", bt_mac], capture_output=True)
+
+        # Poll for serial device, re-poking connection as needed
+        for _ in range(20):
+            subprocess.run([blueutil, "--connect", bt_mac], capture_output=True)
+            try:
+                with serial.Serial(device, 115200, timeout=3) as s:
+                    s.write(payload)
+                    s.flush()
+                    return True
+            except serial.SerialException:
+                time.sleep(0.5)
+
+        print("Error: Could not connect to printer. Is it powered on?")
+        return False
+
+    # Direct serial (no Bluetooth reset)
     try:
         with serial.Serial(device, 115200, timeout=3) as s:
             s.write(payload)
-            return s.readline()
+            s.flush()
+            return True
     except serial.SerialException as exc:
         print(f"Serial error: {exc}")
-        return None
+        return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -187,6 +215,24 @@ def parse_args() -> argparse.Namespace:
             "Nothing is sent to the printer."
         ),
     )
+    parser.add_argument(
+        "--bt-mac",
+        type=str,
+        default=None,
+        help="Bluetooth MAC address. When set, performs an unpair/re-pair cycle before printing.",
+    )
+    parser.add_argument(
+        "--bt-pin",
+        type=str,
+        default="0000",
+        help="Bluetooth pairing PIN (default: 0000).",
+    )
+    parser.add_argument(
+        "--blueutil",
+        type=str,
+        default=None,
+        help="Path to blueutil binary (required with --bt-mac).",
+    )
 
     return parser.parse_args()
 
@@ -207,7 +253,7 @@ def main() -> None:
             )
         return
 
-    # Normal print path, no preview.
+    # Build payload first (before connecting) to minimize connection window
     if args.image:
         bitdata = load_image(str(args.image), preview=False)
     else:
@@ -218,11 +264,12 @@ def main() -> None:
             preview=False,
         )
 
-    command = build_print_command(bitdata, args.density, args.copies)
-    response = send_to_printer(args.device, command)
+    payload = build_print_command(bitdata, args.density, args.copies)
 
-    if response is not None:
-        print(response)
+    if not send_to_printer(args.device, payload,
+                           bt_mac=args.bt_mac, bt_pin=args.bt_pin,
+                           blueutil=args.blueutil):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
